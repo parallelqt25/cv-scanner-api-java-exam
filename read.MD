@@ -1,164 +1,117 @@
-CV Scanner API — Spring Boot (MariaDB) Take‑Home Assessment
+# CV Scanner API — Spring Boot (MariaDB) Take‑Home Assessment
+
+**Goal:** Build a small, production‑ish **Java 17+ / Spring Boot 3.x** API that can **scan CVs** to extract basic profile data and **detect skills** based on **keywords stored in MariaDB**.
+
+- Use **Java 17+**, **Spring Boot 3.x**, **Spring Web**, **Spring Validation**, **Spring Data JPA**, **MariaDB**.
+- Use the **candidate’s email** as the **primary key** for CVs (DB‑level).
+- Publish a **public GitHub repository** with a **clear, exact `README.md`** (this file) and a **Postman collection**.
+- **Naming requirement:** Use **precise, descriptive identifiers** everywhere (e.g., `normalizedCvTextContent`, `keywordSearchQuery`, `keywordCacheTtlSeconds`). Avoid ambiguous abbreviations.
+
+**Suggested timebox:** 6–8 hours. If you run over, submit as‑is with notes.
+
+---
+
+## Table of Contents
+
+1. [Functional Requirements](#functional-requirements)  
+2. [Non‑Functional Requirements](#non-functional-requirements)  
+3. [Tech Constraints](#tech-constraints)  
+4. [Relational Data Model](#relational-data-model)  
+5. [Full MariaDB DDL](#full-mariadb-ddl)  
+6. [API Specification](#api-specification)  
+7. [Scanning Rules](#scanning-rules)  
+8. [Pagination, Sorting, Filtering](#pagination-sorting-filtering)  
+9. [Error Model](#error-model)  
+10. [Caching Requirements](#caching-requirements)  
+11. [Authentication Using JWT (Optional)](#authentication-using-jwt-optional)  
+12. [Batch Scan (Optional)](#batch-scan-optional)  
+13. [Basic UI (Optional)](#basic-ui-optional)  
+14. [Project Structure](#project-structure)  
+15. [Configuration & Setup](#configuration--setup)  
+16. [Build & Run](#build--run)  
+17. [Dependencies (POM excerpt)](#dependencies-pom-excerpt)  
+18. [Postman Collection](#postman-collection)  
+19. [Quick cURL Tests](#quick-curl-tests)  
+20. [Quality Bar & Rubric](#quality-bar--rubric)  
+21. [DTO Signatures (Reference)](#dto-signatures-reference)  
+22. [Minimal Service Outline (Pseudocode)](#minimal-service-outline-pseudocode)  
+23. [Submission Instructions](#submission-instructions)
+
+---
+
+## Functional Requirements
+
+### 1) Keyword CRUD with activation/deactivation
+- Create, read, update, delete **keywords**.
+- Each keyword has:
+  - `keywordId` (surrogate PK)
+  - `keywordPhrase` (case‑insensitive unique; normalized)
+  - `keywordIsActive` (boolean)
+  - `createdAt`, `updatedAt` (timestamps)
+- Activation toggle via dedicated endpoint.
+
+### 2) Keyword search
+- Search with **pagination**, **sorting**, **filtering**.
+- Text query `q` matches phrase (case‑insensitive).
+
+### 3) Scan & Rescan
+- **`POST /scan`** accepts a **single CV** (PDF/DOC/DOCX/TXT) or **raw text**.  
+  Returns:
+  - `extractedCandidateName`
+  - `extractedCandidateEmail` (**primary key**)
+  - `extractedPhoneNumber`
+  - `matchedKeywords[]` with per‑keyword `occurrenceCount`
+  - `matchScore` (0..1)
+- **`POST /rescan?email=...`** reprocesses stored CV text using **current active keywords**.
+
+### Persistence
+- Store **keywords** and **CVs** in MariaDB (DDL below).
+- CVs are keyed by **email** (PK).
+- Each scan is recorded in **`cv_scans`**; per‑keyword matches in **`cv_scan_matches`**.
+- `cvs.last_scan_id` references the latest scan.
+
+---
+
+## Non‑Functional Requirements
+
+- **Precise, descriptive names** for classes/fields.
+- Java 17+, Spring Boot 3.x, **Bean Validation** on all inputs.
+- Layering: **controller → service → repository** with DTOs.
+- Useful logs, structured error responses, robust 4xx/5xx handling.
+- Conventional Commits (or consistent) in a **public** repo.
+- Unit tests for pure logic (normalization, keyword matching).
+- Integration tests (e.g., **Testcontainers MariaDB**).
+
+---
+
+## Tech Constraints
+
+- Build: **Maven** (or Gradle).
+- DB: **MariaDB 10.6+** (**InnoDB**, `utf8mb4`).
+- ORM: Hibernate (Spring Data JPA).
+- File parsing: **Apache Tika** (PDF/DOC/DOCX/TXT).
+- Optional cache: **Spring Cache + Caffeine**.
+- JWT (optional): `spring-boot-starter-oauth2-resource-server` or `jjwt`.
+
+---
+
+## Relational Data Model
+
+**Entities**
+- `keywords` — skill phrases (case‑insensitive unique).
+- `cvs` — uploaded/normalized CV text, **PK = email**.
+- `cv_scans` — each scan result (summary and score).
+- `cv_scan_matches` — N:M between scans and keywords with `occurrence_count`.
 
-Goal: Build a small, production‑ish Java 17+ / Spring Boot 3.x API that can scan CVs to extract basic profile data and detect skills based on keywords stored in MariaDB.
+**Rationale**
+- Normalized storage enables **rescan** against updated keyword sets.
+- `cv_scans` records history; `cvs.last_scan_id` points to latest.
 
-Use Java 17+, Spring Boot 3.x, Spring Web, Spring Validation, Spring Data JPA, MariaDB.
+---
 
-Use the candidate’s email as the primary key for CVs (DB‑level).
+## Full MariaDB DDL
 
-Publish a public GitHub repository with a clear, exact README.md (this file) and a Postman collection.
-
-
-Table of Contents
-
-Functional Requirements
-
-Non‑Functional Requirements
-
-Tech Constraints
-
-Relational Data Model
-
-Full MariaDB DDL
-
-API Specification
-
-Scanning Rules
-
-Pagination, Sorting, Filtering
-
-Error Model
-
-Caching Requirements
-
-Authentication Using JWT (Optional)
-
-Batch Scan (Optional)
-
-Basic UI (Optional)
-
-Project Structure
-
-Configuration & Setup
-
-Build & Run
-
-Dependencies (POM excerpt)
-
-Postman Collection
-
-Quick cURL Tests
-
-Quality Bar & Rubric
-
-DTO Signatures (Reference)
-
-Minimal Service Outline (Pseudocode)
-
-Submission Instructions
-
-Functional Requirements
-1) Keyword CRUD with activation/deactivation
-
-Create, read, update, delete keywords.
-
-Each keyword has:
-
-keywordId (surrogate PK)
-
-keywordPhrase (case‑insensitive unique; normalized)
-
-keywordIsActive (boolean)
-
-createdAt, updatedAt (timestamps)
-
-Activation toggle via dedicated endpoint.
-
-2) Keyword search
-
-Search with pagination, sorting, filtering.
-
-Text query q matches phrase (case‑insensitive).
-
-3) Scan & Rescan
-
-POST /scan accepts a single CV (PDF/DOCX/TXT) or raw text.
-Returns:
-
-extractedCandidateName
-
-extractedCandidateEmail (primary key)
-
-extractedPhoneNumber
-
-matchedKeywords[] with per‑keyword occurrenceCount
-
-matchScore (0..1)
-
-POST /rescan?email=... reprocesses stored CV text using current active keywords.
-
-Persistence
-
-Store keywords and CVs in MariaDB (DDL below).
-
-CVs are keyed by email (PK).
-
-Each scan is recorded in cv_scans; per‑keyword matches in cv_scan_matches.
-
-cvs.last_scan_id references the latest scan.
-
-Non‑Functional Requirements
-
-Precise, descriptive names (e.g., normalizedCvTextContent, keywordSearchQuery, keywordCacheTtlSeconds).
-
-Java 17+, Spring Boot 3.x, Bean Validation on all inputs.
-
-Clear layering: controller → service → repository with DTOs.
-
-Useful logs, structured errors, robust 4xx/5xx handling.
-
-Conventional Commits (or consistent) in a public repo.
-
-Unit tests for pure logic (normalization, keyword matching).
-
-Integration tests (e.g., Testcontainers MariaDB).
-
-Tech Constraints
-
-Build: Maven (or Gradle).
-
-DB: MariaDB 10.6+ (InnoDB, utf8mb4).
-
-JPA: Hibernate (Spring Data JPA).
-
-File parsing: Apache Tika (PDF/DOC/DOCX/TXT).
-
-Optional cache: Spring Cache + Caffeine.
-
-JWT (optional): spring-boot-starter-oauth2-resource-server or jjwt.
-
-Relational Data Model
-
-Entities
-
-keywords — skill phrases (case‑insensitive unique).
-
-cvs — uploaded/normalized CV text, PK = email.
-
-cv_scans — each scan result (summary and score).
-
-cv_scan_matches — N:M between scans and keywords with occurrence_count.
-
-Why this shape?
-
-Normalized storage enables rescan against updated keyword sets.
-
-cv_scans records history; cvs.last_scan_id points to latest.
-
-Full MariaDB DDL
-
-Put this file at src/main/resources/db/migration/V1__baseline.sql (Flyway), or run manually.
-
+```sql
 -- Requires MariaDB 10.6+ (InnoDB; utf8mb4)
 SET NAMES utf8mb4;
 SET sql_mode = 'STRICT_ALL_TABLES';
@@ -210,7 +163,7 @@ DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
--- TABLE: cv_scans  (each scan result; enforces email consistency vs cvs.email)
+-- TABLE: cv_scans  (each scan result; ensure email consistency vs cvs.email)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS cv_scans (
   scan_id                        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -293,28 +246,24 @@ COLLATE=utf8mb4_unicode_ci;
 -- SAMPLE DATA (optional)
 -- INSERT INTO keywords (keyword_phrase, keyword_is_active) VALUES
 --   ('Java', 1), ('Spring Boot', 1), ('Hibernate', 1), ('Docker', 1), ('Kubernetes', 0);
+```
 
+---
 
-Notes
+## API Specification
 
-Generated *_lower columns ensure true case‑insensitive uniqueness regardless of collation.
+**Base URL:** `http://localhost:8080/api`
 
-cvs.email is the PK and referenced everywhere; we additionally CHECK that extracted_candidate_email equals cv_email.
-
-All tables use InnoDB, utf8mb4, STRICT SQL mode.
-
-API Specification
-
-Base URL: http://localhost:8080/api
-
-Health
+### Health
+```
 GET /health
 → 200 { "status": "ok", "service": "cv-scanner-api", "ts": "<iso>" }
+```
 
-Keywords
+### Keywords
 
-Create
-
+**Create**
+```http
 POST /keywords
 Content-Type: application/json
 
@@ -322,70 +271,75 @@ Content-Type: application/json
   "keywordPhrase": "Spring Boot",
   "keywordIsActive": true
 }
-→ 201 { keywordId, keywordPhrase, keywordIsActive, createdAt, updatedAt }
+→ 201 { "keywordId": 1, "keywordPhrase": "spring boot", "keywordIsActive": true, "createdAt": "...", "updatedAt": "..." }
+```
 
-
-Get by ID
-
+**Get by ID**
+```http
 GET /keywords/{keywordId}
-→ 200 {...} or 404
+→ 200 {...} | 404
+```
 
-
-Update
-
+**Update**
+```http
 PUT /keywords/{keywordId}
+Content-Type: application/json
+
 {
   "keywordPhrase": "hibernate",
   "keywordIsActive": false
 }
-→ 200 {...} or 404
+→ 200 {...} | 404
+```
 
-
-Delete
-
+**Delete**
+```http
 DELETE /keywords/{keywordId}
-→ 204 or 404
+→ 204 | 404
+```
 
-
-Toggle activation
-
+**Toggle activation**
+```http
 PATCH /keywords/{keywordId}/activation
+Content-Type: application/json
+
 { "keywordIsActive": true }
-→ 200 {...} or 404
+→ 200 {...} | 404
+```
 
-
-Search (pagination/sort/filter)
-
+**Search (pagination/sort/filter)**
+```http
 GET /keywords/search?q=script&keywordIsActive=true&page=1&pageSize=20&sortBy=createdAt&sortDirection=desc
 → 200 {
-     "page": 1,
-     "pageSize": 20,
-     "totalItems": 1,
-     "totalPages": 1,
+     "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1,
      "items": [{ "keywordId": 1, "keywordPhrase": "javascript", "keywordIsActive": true, "createdAt": "...", "updatedAt": "..." }]
    }
+```
 
-Scan
+### Scan
 
-Upload & scan a CV
-
+**Upload & scan a CV**
+```http
 POST /scan
 Content-Type: multipart/form-data
 
-file: <PDF|DOCX|TXT>
+file: <PDF|DOC|DOCX|TXT>
 -- OR --
 rawText: <string>
 
 → 200 ScanResult
+```
 
-
-Rescan existing CV by email
-
+**Rescan existing CV by email**
+```http
 POST /rescan?email=jane.doe@example.com
 → 200 ScanResult
 → 404 if CV not found
+```
 
-Response Types
+### Response Types
+
+```json
 {
   "extractedCandidateName": "Jane Doe",
   "extractedCandidateEmail": "jane.doe@example.com",
@@ -398,100 +352,81 @@ Response Types
   "totalActiveKeywordCount": 5,
   "processedAtIso": "2025-01-01T12:34:56.789Z"
 }
+```
 
-Scanning Rules
+---
 
-Text extraction
+## Scanning Rules
 
-Use Apache Tika to extract from PDF/DOC/DOCX/TXT.
+1. **Text extraction**
+   - Use **Apache Tika** to extract from PDF/DOC/DOCX/TXT.
+   - If both `file` and `rawText` provided, prefer `file`.
 
-If both file and rawText are provided, prefer file.
+2. **Normalization**
+   - Lowercase; collapse whitespace; strip non‑alphanumeric except `+`, `#`, `.`, and hyphens inside tokens.
+   - Implement `String normalizeText(String raw)`.
 
-Normalization
+3. **Email & phone extraction**
+   - Email: robust regex (RFC‑ish).
+   - Phone: permissive international regex; return the best first match.
 
-Lowercase; collapse whitespace; strip non‑alphanumeric except +, #, ., and hyphens inside tokens.
+4. **Name extraction (best‑effort)**
+   - Inspect the first ~5 non‑empty lines for **2–4 capitalized tokens** not containing email/phone.
+   - Fallback: derive from the email local‑part (`jane.doe` → `Jane Doe`).
 
-Implement String normalizeText(String raw).
+5. **Keyword matching**
+   - Load **active** keywords only (use cache).
+   - Match whole words/phrases; count **occurrenceCount** per keyword (regex with `\b` where sensible; escape `c++`, `node.js`, etc.).
+   - Include only keywords with `occurrenceCount > 0`.
 
-Email & phone extraction
+6. **Score**
+   - `matchScore = matchedKeywordCount / totalActiveKeywordCount` (0..1).
+   - If no active keywords exist, `matchScore = 0` and `totalActiveKeywordCount = 0`.
 
-Email: robust regex (RFC‑ish).
+7. **Persistence**
+   - Upsert `cvs` by **email** (PK).
+   - Insert into `cv_scans` and `cv_scan_matches`; update `cvs.last_scan_id` & `cvs.last_scanned_at`.
 
-Phone: permissive international regex; return best first.
+---
 
-Name extraction (best‑effort)
+## Pagination, Sorting, Filtering
 
-Look in the first ~5 non‑empty lines for 2–4 capitalized tokens not containing email/phone.
+- **Pagination:** `page` (1‑based), `pageSize` (default 20, max 100).
+- **Sorting:** `sortBy` ∈ `keywordPhrase | createdAt | updatedAt | keywordIsActive`; `sortDirection` ∈ `asc|desc`.
+- **Filtering:** `keywordIsActive` boolean; `q` applies to `keywordPhrase` contains (case‑insensitive).
+- Implement via Spring Data `Pageable` + custom `Specification`/`Example`.
 
-Fallback: derive from the email local‑part (jane.doe → Jane Doe).
+---
 
-Keyword matching
-
-Load active keywords only (use cache).
-
-Match whole words/phrases; count occurrenceCount for each (regex with \b where sensible; escape c++, node.js, etc.).
-
-Include only keywords with occurrenceCount > 0.
-
-Score
-
-matchScore = matchedKeywordCount / totalActiveKeywordCount (0..1).
-
-If no active keywords exist, matchScore = 0 and totalActiveKeywordCount = 0.
-
-Persistence
-
-Upsert cvs by email (PK).
-
-Insert into cv_scans and cv_scan_matches; update cvs.last_scan_id & cvs.last_scanned_at.
-
-Pagination, Sorting, Filtering
-
-Pagination: page (1‑based), pageSize (default 20, max 100).
-
-Sorting: sortBy ∈ keywordPhrase | createdAt | updatedAt | keywordIsActive; sortDirection ∈ asc|desc.
-
-Filtering: keywordIsActive boolean; q applies to keywordPhrase contains (case‑insensitive).
-
-Implement via Spring Data Pageable + custom Specification/Example.
-
-Error Model
+## Error Model
 
 All errors return JSON:
 
+```json
 {
   "errorCode": "VALIDATION_ERROR | NOT_FOUND | CONFLICT | UNAUTHORIZED | FORBIDDEN | INTERNAL_ERROR",
   "errorMessage": "Human-readable detail",
   "details": { "field": "keywordPhrase" }
 }
+```
+- 400: validation
+- 401/403: auth (if using JWT)
+- 404: not found
+- 409: uniqueness conflict (duplicate keyword)
+- 415: unsupported media type
+- 500: unexpected error
 
+---
 
-400: validation
+## Caching Requirements
 
-401/403: auth (if using JWT)
+- Use **Spring Cache (Caffeine)** for **active keywords**:
+  - Cache name: `activeKeywordsCache`
+  - TTL: **60 seconds** (configurable via `keywordCacheTtlSeconds`).
+  - Add response header `X-Cache: HIT|MISS` on routes that use the cache.
+  - Invalidate on keyword create/update/delete/toggle.
 
-404: not found
-
-409: uniqueness conflict (duplicate keyword)
-
-415: unsupported media type
-
-500: unexpected error
-
-Caching Requirements
-
-Use Spring Cache (Caffeine) for active keywords:
-
-Cache name: activeKeywordsCache
-
-TTL: 60 seconds (config: keywordCacheTtlSeconds).
-
-Add X-Cache: HIT|MISS header on routes that use it.
-
-Invalidate on keyword create/update/delete/toggle.
-
-application.yml fragment
-
+```yaml
 spring:
   cache:
     cache-names: activeKeywordsCache
@@ -499,18 +434,22 @@ spring:
       spec: maximumSize=1000,expireAfterWrite=60s
 app:
   keywordCacheTtlSeconds: 60
+```
 
-Authentication Using JWT (Optional)
+---
 
-POST /auth/login with a demo user (env or app_users table) → JWT.
+## Authentication Using JWT (Optional)
 
-Protect mutating routes (POST/PUT/PATCH/DELETE, /scan, /rescan, /batch/scan).
+- `POST /auth/login` with a demo user (env or `app_users` table) → JWT.
+- Protect mutating routes (`POST/PUT/PATCH/DELETE`, `/scan`, `/rescan`, `/batch/scan`).
+- Use `Authorization: Bearer <token>`.
+- Env: `JWT_SECRET`, optional `DEMO_USERNAME`, `DEMO_PASSWORD` (or seed a user in `app_users` with BCrypt).
 
-Use Authorization: Bearer <token>.
+---
 
-Env: JWT_SECRET, optional DEMO_USERNAME, DEMO_PASSWORD (or seed a user in app_users with BCrypt).
+## Batch Scan (Optional)
 
-Batch Scan (Optional)
+```http
 POST /batch/scan
 Content-Type: multipart/form-data
 archive: <ZIP with .pdf/.doc/.docx/.txt>
@@ -518,25 +457,27 @@ archive: <ZIP with .pdf/.doc/.docx/.txt>
 → 200 {
   "batchId": "2025-...uuid",
   "items": [
-    { "filename": "jane.pdf", "status": "ok", "result": { ...ScanResult } },
+    { "filename": "jane.pdf", "status": "ok", "result": { /* ScanResult */ } },
     { "filename": "dup_jane.pdf", "status": "error", "errorMessage": "duplicate email..." }
   ]
 }
+```
+- Partial success allowed.
+- On duplicate emails within the same ZIP, keep the **first** and mark the rest as `"error"`.
 
+---
 
-Partial success allowed.
+## Basic UI (Optional)
 
-On duplicate emails within the same ZIP, keep the first and mark the rest as "error".
+- Serve a tiny HTML page at `/`:
+  - Upload control for `/scan` and display JSON result.
+  - Keyword table (from `/keywords/search`) with activation toggles.
 
-Basic UI (Optional)
+---
 
-Serve a tiny HTML page at /:
+## Project Structure
 
-Upload control for /scan and display JSON result.
-
-Keyword table (from /keywords/search) with activation toggles.
-
-Project Structure
+```text
 .
 ├─ src/main/java/com/example/cvscanner/
 │  ├─ CvScannerApplication.java
@@ -578,19 +519,25 @@ Project Structure
 ├─ postman/CV-Scanner.postman_collection.json
 ├─ pom.xml
 └─ README.md
+```
 
-Configuration & Setup
+---
 
-MariaDB
+## Configuration & Setup
 
-# Create DB and user (adjust creds)
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS cv_scanner DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p -e "CREATE USER IF NOT EXISTS 'cv_scanner_user'@'%' IDENTIFIED BY 'changeme';"
-mysql -u root -p -e "GRANT ALL PRIVILEGES ON cv_scanner.* TO 'cv_scanner_user'@'%'; FLUSH PRIVILEGES;"
+**MariaDB — create DB and user**
 
+```sql
+CREATE DATABASE IF NOT EXISTS cv_scanner
+  DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'cv_scanner_user'@'%' IDENTIFIED BY 'changeme';
+GRANT ALL PRIVILEGES ON cv_scanner.* TO 'cv_scanner_user'@'%';
+FLUSH PRIVILEGES;
+```
 
-application.yml (example)
+**`application.yml` (example)**
 
+```yaml
 server:
   port: 8080
 
@@ -616,17 +563,26 @@ spring:
 app:
   keywordCacheTtlSeconds: 60
   uploadMaxSizeMb: 10
+```
 
-Build & Run
+---
+
+## Build & Run
+
+```bash
 # Build & run
 ./mvnw spring-boot:run
-# or
+# or package a jar
 ./mvnw clean package && java -jar target/cv-scanner-*.jar
+```
 
+Server runs at `http://localhost:8080`.
 
-Server runs at http://localhost:8080.
+---
 
-Dependencies (POM excerpt)
+## Dependencies (POM excerpt)
+
+```xml
 <dependencies>
   <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -699,61 +655,65 @@ Dependencies (POM excerpt)
     <scope>test</scope>
   </dependency>
 </dependencies>
+```
 
-Postman Collection
+---
 
-Include postman/CV-Scanner.postman_collection.json with folders:
+## Postman Collection
 
-Health — GET /api/health
+Include `postman/CV-Scanner.postman_collection.json` with folders:
 
-Keywords — create/get/update/toggle/delete/search
+1. **Health** — `GET /api/health`  
+2. **Keywords** — create/get/update/toggle/delete/search  
+3. **Scan** — `POST /api/scan` (multipart or rawText), `POST /api/rescan?email=...`  
+4. **Optional** — `POST /api/auth/login`, `POST /api/batch/scan`
 
-Scan — POST /api/scan (multipart or rawText), POST /api/rescan?email=...
-
-Optional — POST /api/auth/login, POST /api/batch/scan
-
-Example Postman tests
-
+**Example Postman tests**
+```javascript
 pm.test("Status is 200", () => pm.response.to.have.status(200));
 pm.test("Has matchScore", () => pm.expect(pm.response.json()).to.have.property("matchScore"));
+```
 
-Quick cURL Tests
+---
+
+## Quick cURL Tests
+
+```bash
 # Health
 curl -s http://localhost:8080/api/health
 
 # Create a keyword
-curl -s -X POST http://localhost:8080/api/keywords \
-  -H "Content-Type: application/json" \
-  -d '{"keywordPhrase":"Spring Boot","keywordIsActive":true}'
+curl -s -X POST http://localhost:8080/api/keywords   -H "Content-Type: application/json"   -d '{"keywordPhrase":"Spring Boot","keywordIsActive":true}'
 
 # Search keywords
 curl -s "http://localhost:8080/api/keywords/search?q=boot&page=1&pageSize=5"
 
 # Scan with raw text
-curl -s -X POST http://localhost:8080/api/scan \
-  -F rawText='Jane Doe
+curl -s -X POST http://localhost:8080/api/scan   -F rawText='Jane Doe
 jane.doe@example.com
 +1 415 555 1234
 Skills: Java, Spring Boot, Hibernate, Docker'
 
 # Rescan
 curl -s -X POST "http://localhost:8080/api/rescan?email=jane.doe@example.com"
+```
 
-Quality Bar & Rubric (100 pts)
+---
 
-Core functionality (CRUD, search, scan/rescan): 40
+## Quality Bar & Rubric (100 pts)
 
-Code quality & structure (naming, layering, DTOs, validation): 20
+- **Core functionality (CRUD, search, scan/rescan): 40**
+- **Code quality & structure (naming, layering, DTOs, validation): 20**
+- **Docs & run instructions (this README): 10**
+- **Tests (unit for text/regex; integration with MariaDB): 10**
+- **Git hygiene (public repo, meaningful commits): 10**
+- **Extras (any of: JWT, batch/scan, basic UI, caching): 10**
 
-Docs & run instructions (this README): 10
+---
 
-Tests (unit for text/regex; integration with MariaDB): 10
+## DTO Signatures (Reference)
 
-Git hygiene (public repo, meaningful commits): 10
-
-Extras (any of: JWT, batch/scan, basic UI, caching): 10
-
-DTO Signatures (Reference)
+```java
 public record CreateKeywordRequest(
     @NotBlank @Size(max = 255) String keywordPhrase,
     Boolean keywordIsActive
@@ -783,10 +743,15 @@ public record ScanResult(
 ) {
   public record MatchedKeyword(String keywordPhrase, int occurrenceCount) {}
 }
+```
 
-Minimal Service Outline (Pseudocode)
+---
+
+## Minimal Service Outline (Pseudocode)
+
+```java
 // KeywordService
-List<Keyword> getActiveKeywordsCached(); // also set X-Cache: HIT|MISS
+List<Keyword> getActiveKeywordsCached(); // add X-Cache: HIT|MISS
 Keyword createKeyword(CreateKeywordRequest req);
 Keyword updateKeyword(Long id, UpdateKeywordRequest req);
 void toggleActivation(Long id, boolean isActive);
@@ -802,27 +767,20 @@ Optional<String> extractEmail(String text);
 Optional<String> extractPhone(String text);
 Optional<String> extractName(String originalText, String fallbackFromEmail);
 Map<String,Integer> countKeywordOccurrences(String normalizedText, List<String> activeKeywordPhrases);
+```
 
-Submission Instructions
+---
 
-Create a public GitHub repository (recommended name: cv-scanner-api-springboot).
+## Submission Instructions
 
-Implement the solution following this spec.
-
-Include:
-
-This README.md,
-
-A Postman collection in /postman,
-
-src/main/resources/db/migration/V1__baseline.sql (DDL above),
-
-Minimal sample files in /samples (one PDF or TXT is enough).
-
-Verify locally:
-
-./mvnw spring-boot:run boots the server,
-
-GET /api/health returns 200.
-
-Share the repo URL and (optional) a brief note on trade‑offs.
+1. Create a **public GitHub repository** (recommended name: `cv-scanner-api-springboot`).  
+2. Implement the solution following this spec.  
+3. Include:
+   - This **`README.md`**,
+   - A **Postman collection** in `/postman`,
+   - **Flyway migration** with the full DDL at `src/main/resources/db/migration/V1__baseline.sql`,
+   - Minimal sample files in `/samples` (one PDF or TXT is enough).
+4. Verify locally:
+   - `./mvnw spring-boot:run` boots the server,
+   - `GET /api/health` returns `200`.
+5. Share the **repo URL** and (optional) a brief note on trade‑offs.
